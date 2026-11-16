@@ -17,6 +17,7 @@ A React-based job application tracker that helps users manage job applications, 
 - Sort applications by company or application date.
 - Paginate application results.
 - Keep search, filter, sort, and page information in the URL.
+- Select applications on the current page for bulk deletion or status updates.
 - Create, edit, view, and delete applications.
 
 ### Application Management

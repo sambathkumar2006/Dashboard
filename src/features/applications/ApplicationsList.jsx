@@ -1,9 +1,14 @@
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { Link, useSearchParams } from "react-router-dom";
 
-import { fetchApplications } from "./applicationsSlice";
+import {
+  editApplication,
+  fetchApplications,
+  removeApplication,
+} from "./applicationsSlice";
+import ConfirmModal from "../../components/ConfirmModal";
 
 import {
   selectApplications,
@@ -40,6 +45,15 @@ function ApplicationsList() {
   const [currentPage, setCurrentPage] = useState(
     Number(searchParams.get("page")) || 1
   );
+
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [bulkStatus, setBulkStatus] = useState("");
+  const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
+  const [bulkError, setBulkError] = useState("");
+  const [bulkSuccess, setBulkSuccess] = useState("");
+  const selectAllRef = useRef(null);
 
   const applicationsPerPage = 10;
 
@@ -139,6 +153,165 @@ function ApplicationsList() {
     startIndex,
     startIndex + applicationsPerPage
   );
+
+  const applicationIds = new Set(
+    applications.map((application) => application.id)
+  );
+  const activeSelectedIds = new Set(
+    [...selectedIds].filter((id) => applicationIds.has(id))
+  );
+  const currentPageIds = currentApplications.map(
+    (application) => application.id
+  );
+  const selectedOnCurrentPage = currentPageIds.filter((id) =>
+    activeSelectedIds.has(id)
+  ).length;
+  const allCurrentPageSelected =
+    currentPageIds.length > 0 &&
+    selectedOnCurrentPage === currentPageIds.length;
+
+  useEffect(() => {
+    if (selectAllRef.current) {
+      selectAllRef.current.indeterminate =
+        selectedOnCurrentPage > 0 && !allCurrentPageSelected;
+    }
+  }, [selectedOnCurrentPage, allCurrentPageSelected]);
+
+  const toggleApplication = (id) => {
+    setSelectedIds((previousIds) => {
+      const nextIds = new Set(
+        [...previousIds].filter((selectedId) =>
+          applicationIds.has(selectedId)
+        )
+      );
+
+      if (nextIds.has(id)) {
+        nextIds.delete(id);
+      } else {
+        nextIds.add(id);
+      }
+
+      return nextIds;
+    });
+  };
+
+  const toggleCurrentPage = () => {
+    setSelectedIds((previousIds) => {
+      const nextIds = new Set(
+        [...previousIds].filter((id) => applicationIds.has(id))
+      );
+
+      if (allCurrentPageSelected) {
+        currentPageIds.forEach((id) => nextIds.delete(id));
+      } else {
+        currentPageIds.forEach((id) => nextIds.add(id));
+      }
+
+      return nextIds;
+    });
+  };
+
+  const handleBulkDelete = async () => {
+    setIsDeleting(true);
+    setBulkError("");
+    setBulkSuccess("");
+
+    const results = await Promise.all(
+      [...activeSelectedIds].map(async (id) => {
+        try {
+          await dispatch(removeApplication(id)).unwrap();
+          return { id, succeeded: true };
+        } catch (deleteError) {
+          return {
+            id,
+            succeeded: false,
+            message:
+              typeof deleteError === "string"
+                ? deleteError
+                : deleteError?.message || "Unknown error",
+          };
+        }
+      })
+    );
+
+    const failed = results.filter((result) => !result.succeeded);
+    const failedIds = new Set(failed.map((result) => result.id));
+    setSelectedIds(failedIds);
+    setIsDeleting(false);
+    setIsDeleteModalOpen(false);
+
+    if (failed.length > 0) {
+      setBulkError(
+        `Deleted ${results.length - failed.length} application(s). Failed to delete ${failed.length} application(s) (ID${failed.length === 1 ? "" : "s"}: ${failed.map((result) => result.id).join(", ")}). ${failed[0].message}`
+      );
+    } else {
+      setBulkSuccess(
+        `Deleted ${results.length} application${results.length === 1 ? "" : "s"}.`
+      );
+    }
+  };
+
+  const handleBulkStatusUpdate = async () => {
+    if (!bulkStatus || activeSelectedIds.size === 0) return;
+
+    setIsUpdatingStatus(true);
+    setBulkError("");
+    setBulkSuccess("");
+
+    const selectedApplications = applications.filter((application) =>
+      activeSelectedIds.has(application.id)
+    );
+    const results = await Promise.all(
+      selectedApplications.map(async (application) => {
+        const now = new Date().toISOString();
+        const statusChanged = application.status !== bulkStatus;
+        const applicationData = {
+          ...application,
+          status: bulkStatus,
+          updatedAt: now,
+          statusHistory: statusChanged
+            ? [
+                ...(application.statusHistory || []),
+                { status: bulkStatus, changedAt: now },
+              ]
+            : application.statusHistory || [],
+        };
+
+        try {
+          await dispatch(
+            editApplication({
+              id: application.id,
+              applicationData,
+            })
+          ).unwrap();
+          return { id: application.id, succeeded: true };
+        } catch (updateError) {
+          return {
+            id: application.id,
+            succeeded: false,
+            message:
+              typeof updateError === "string"
+                ? updateError
+                : updateError?.message || "Unknown error",
+          };
+        }
+      })
+    );
+
+    const failed = results.filter((result) => !result.succeeded);
+    setIsUpdatingStatus(false);
+
+    if (failed.length > 0) {
+      const succeededCount = results.length - failed.length;
+      setBulkError(
+        `Updated ${succeededCount} application(s). Failed to update ${failed.length} application(s) (ID${failed.length === 1 ? "" : "s"}: ${failed.map((result) => result.id).join(", ")}). ${failed[0].message}`
+      );
+    } else {
+      setBulkSuccess(
+        `Updated the status of ${results.length} application${results.length === 1 ? "" : "s"}.`
+      );
+    }
+  };
 
   if (status === "loading") {
     return (
@@ -277,14 +450,93 @@ function ApplicationsList() {
       <section className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
 
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 p-5 dark:border-gray-800">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-            All Applications
-          </h2>
+          <div className="flex items-center gap-3">
+            <input
+              ref={selectAllRef}
+              type="checkbox"
+              checked={allCurrentPageSelected}
+              onChange={toggleCurrentPage}
+              aria-label="Select all applications on this page"
+              className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800"
+            />
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+              All Applications
+            </h2>
+          </div>
 
-          <span className="text-sm text-gray-500 dark:text-gray-400">
-            Showing {currentApplications.length} of {sortedApplications.length}
-          </span>
+          <div className="flex flex-wrap items-center gap-4">
+            {activeSelectedIds.size > 0 && (
+              <>
+                <span
+                  className="text-sm font-medium text-blue-700 dark:text-blue-300"
+                  aria-live="polite"
+                >
+                  {activeSelectedIds.size} selected
+                </span>
+                <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+                  <select
+                    value={bulkStatus}
+                    onChange={(event) => {
+                      setBulkStatus(event.target.value);
+                      setBulkError("");
+                      setBulkSuccess("");
+                    }}
+                    disabled={isUpdatingStatus || isDeleting}
+                    aria-label="Set status for selected applications"
+                    className="min-w-40 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-800 dark:text-white"
+                  >
+                    <option value="">Set status...</option>
+                    <option value="wishlist">Wishlist</option>
+                    <option value="applied">Applied</option>
+                    <option value="interview">Interview</option>
+                    <option value="offer">Offer</option>
+                    <option value="rejected">Rejected</option>
+                  </select>
+                  <button
+                    type="button"
+                    onClick={handleBulkStatusUpdate}
+                    disabled={!bulkStatus || isUpdatingStatus || isDeleting}
+                    className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {isUpdatingStatus ? "Applying..." : "Apply"}
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setBulkError("");
+                    setBulkSuccess("");
+                    setIsDeleteModalOpen(true);
+                  }}
+                  disabled={isDeleting || isUpdatingStatus}
+                  className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Bulk Delete
+                </button>
+              </>
+            )}
+            <span className="text-sm text-gray-500 dark:text-gray-400">
+              Showing {currentApplications.length} of {sortedApplications.length}
+            </span>
+          </div>
         </div>
+
+        {bulkError && (
+          <div
+            role="alert"
+            className="border-b border-red-200 bg-red-50 px-5 py-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300"
+          >
+            {bulkError}
+          </div>
+        )}
+        {bulkSuccess && (
+          <div
+            role="status"
+            className="border-b border-green-200 bg-green-50 px-5 py-3 text-sm text-green-700 dark:border-green-900 dark:bg-green-950 dark:text-green-300"
+          >
+            {bulkSuccess}
+          </div>
+        )}
 
         {currentApplications.length === 0 ? (
           <div className="px-5 py-16 text-center">
@@ -299,23 +551,34 @@ function ApplicationsList() {
         ) : (
           <div className="divide-y divide-gray-100 dark:divide-gray-800">
             {currentApplications.map((application) => (
-              <Link
+              <div
                 key={application.id}
-                to={`/applications/${application.id}`}
                 className="flex flex-wrap items-center justify-between gap-4 p-5 transition hover:bg-gray-50 dark:hover:bg-gray-800"
               >
-                <div className="min-w-0">
-                  <h3 className="font-semibold text-gray-900 dark:text-white">
-                    {application.company}
-                  </h3>
+                <div className="flex min-w-0 items-start gap-3">
+                  <input
+                    type="checkbox"
+                    checked={activeSelectedIds.has(application.id)}
+                    onChange={() => toggleApplication(application.id)}
+                    aria-label={`Select ${application.company} application`}
+                    className="mt-1 h-4 w-4 shrink-0 rounded border-gray-300 text-blue-600 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800"
+                  />
+                  <div className="min-w-0">
+                    <Link
+                      to={`/applications/${application.id}`}
+                      className="font-semibold text-gray-900 hover:text-blue-600 dark:text-white dark:hover:text-blue-300"
+                    >
+                      {application.company}
+                    </Link>
 
-                  <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                    {application.role}
-                  </p>
+                    <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                      {application.role}
+                    </p>
 
-                  <p className="mt-2 text-xs text-gray-400">
-                    Applied: {application.dateApplied || "Not applied yet"}
-                  </p>
+                    <p className="mt-2 text-xs text-gray-400">
+                      Applied: {application.dateApplied || "Not applied yet"}
+                    </p>
+                  </div>
                 </div>
 
                 <div className="flex items-center gap-3">
@@ -323,11 +586,14 @@ function ApplicationsList() {
                     {application.status}
                   </span>
 
-                  <span className="text-sm text-gray-400">
+                  <Link
+                    to={`/applications/${application.id}`}
+                    className="text-sm text-gray-400 hover:text-blue-600 dark:hover:text-blue-300"
+                  >
                     View →
-                  </span>
+                  </Link>
                 </div>
-              </Link>
+              </div>
             ))}
           </div>
         )}
@@ -360,6 +626,18 @@ function ApplicationsList() {
           </div>
         </div>
       </section>
+      <ConfirmModal
+        isOpen={isDeleteModalOpen}
+        title="Delete selected applications?"
+        message={`This will permanently delete ${activeSelectedIds.size} application${activeSelectedIds.size === 1 ? "" : "s"}. This action cannot be undone.`}
+        onConfirm={handleBulkDelete}
+        onCancel={() => {
+          if (!isDeleting) {
+            setIsDeleteModalOpen(false);
+          }
+        }}
+        isLoading={isDeleting}
+      />
     </div>
   );
 }
