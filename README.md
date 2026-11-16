@@ -17,8 +17,14 @@ A React-based job application tracker that helps users manage job applications, 
 - Sort applications by company or application date.
 - Paginate application results.
 - Keep search, filter, sort, and page information in the URL.
-- Select applications on the current page for bulk deletion or status updates.
+- Select individual applications or all applications on the current page.
+- Bulk-delete selected applications after confirmation.
+- Update the status of selected applications in one operation, with status history tracking.
 - Create, edit, view, and delete applications.
+
+Bulk actions show the number of selected applications and report partial failures
+so failed records can be retried. Selection is kept consistent with the currently
+loaded application records.
 
 ### Application Management
 - Reusable application form.
@@ -173,7 +179,7 @@ A reusable custom hook that manages:
 - Add automated tests for components and Redux operations.
 - Persist the selected theme between sessions.
 - Improve accessibility, including keyboard support for Kanban interactions.
-- Add CSV export and bulk application actions.
+- Add CSV export.
 - Consider server-side filtering and pagination for larger datasets.
 - Add more dashboard analytics.
 
